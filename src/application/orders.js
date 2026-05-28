@@ -1,16 +1,34 @@
-import { initialOrders } from "@/domain/laundryCatalog";
+import api from "@/infrastructure/api";
 
-export function createOrder(formValues, sequence) {
-  return {
-    id: `GPL-${String(sequence).padStart(4, "0")}`,
-    customer: formValues.customer.trim(),
-    phone: formValues.phone.trim(),
+export async function fetchOrders() {
+  const res = await api.get("/api/order/getOrder");
+  return res.data?.data || [];
+}
+
+export async function createOrder(formValues) {
+  const payload = {
+    customer: String(formValues.customer || "").trim(),
+    phone: String(formValues.phone || "").trim(),
     service: formValues.service,
-    items: Number(formValues.items),
+    quantity: Number(formValues.items),
     amount: Number(formValues.amount),
-    due: formValues.due.trim(),
-    status: "Pending",
+    due: new Date(formValues.due).toISOString(),
+    tower: formValues.tower || "",
+    flat: formValues.flat || "",
   };
+
+  const res = await api.post("/api/order/createOrder", payload);
+  return res.data?.data;
+}
+
+export async function updateOrder(id, status) {
+  const res = await api.put(`/api/order/updateorder/${id}`, { status });
+  return res.data?.data;
+}
+
+export async function deleteOrder(id) {
+  const res = await api.delete(`/api/order/deleteorder/${id}`);
+  return res.data?.data;
 }
 
 export function calculateOrderSummary(orders) {
@@ -23,5 +41,5 @@ export function calculateOrderSummary(orders) {
 }
 
 export function getInitialOrders() {
-  return initialOrders;
+  return [];
 }

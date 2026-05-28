@@ -4,9 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import logo from "@/assets/logo.png";
-import { calculateOrderSummary, createOrder, getInitialOrders } from "@/application/orders";
+import { calculateOrderSummary, fetchOrders, createOrder, updateOrder, deleteOrder } from "@/application/orders";
 import { orderStatuses, services } from "@/domain/laundryCatalog";
-import { loadOrders, saveOrders } from "@/infrastructure/orderStorage";
+import { saveOrders } from "@/infrastructure/orderStorage";
 import { endOwnerSession } from "@/infrastructure/sessionStorage";
 import styles from "./Dashboard.module.css";
 
@@ -16,20 +16,41 @@ const blankForm = {
   service: "Wash and Fold",
   items: "1",
   amount: "100",
-  due: "Today, 8:00 PM",
+  due: new Date().toISOString().slice(0, 16), // datetime-local value
+  tower: "",
+  flat: "",
 };
 
 export function Dashboard() {
   const router = useRouter();
-  const [orders, setOrders] = useState(() => {
-    if (typeof window === "undefined") {
-      return getInitialOrders();
-    }
-
-    return loadOrders(getInitialOrders());
-  });
+  const [orders, setOrders] = useState([]);
   const [filter, setFilter] = useState("All");
   const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const serverOrders = await fetchOrders();
+        // normalize server shape to UI shape
+        const mapped = serverOrders.map((o) => ({
+          id: o._id || o.id,
+          customer: o.customer,
+          phone: o.phone,
+          service: o.service,
+          items: o.quantity || o.items || 1,
+          amount: o.amount || 0,
+          due: o.due ? new Date(o.due).toLocaleString() : String(o.due || ""),
+          status: o.status || "Pending",
+        }));
+        setOrders(mapped);
+      } catch (err) {
+        // keep empty list on error
+        setOrders([]);
+      }
+    }
+
+    load();
+  }, []);
 
   useEffect(() => {
     saveOrders(orders);
@@ -47,22 +68,48 @@ export function Dashboard() {
     return matchesStatus && matchesQuery;
   });
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    const nextOrder = createOrder(Object.fromEntries(formData), 1052 + orders.length);
-    setOrders((currentOrders) => [nextOrder, ...currentOrders]);
-    event.currentTarget.reset();
+    const values = Object.fromEntries(formData);
+    try {
+      const created = await createOrder(values);
+      const mapped = {
+        id: created._id || created.id,
+        customer: created.customer,
+        phone: created.phone,
+        service: created.service,
+        items: created.quantity || created.items || 1,
+        amount: created.amount || 0,
+        due: created.due ? new Date(created.due).toLocaleString() : String(created.due || ""),
+        status: created.status || "Pending",
+      };
+      setOrders((currentOrders) => [mapped, ...currentOrders]);
+      event.currentTarget.reset();
+    } catch (err) {
+      // TODO: show error UI
+      console.error(err);
+    }
   }
 
-  function updateStatus(orderId, status) {
-    setOrders((currentOrders) =>
-      currentOrders.map((order) => (order.id === orderId ? { ...order, status } : order)),
-    );
+  async function updateStatus(orderId, status) {
+    try {
+      await updateOrder(orderId, status);
+      setOrders((currentOrders) =>
+        currentOrders.map((order) => (order.id === orderId ? { ...order, status } : order)),
+      );
+    } catch (err) {
+      console.error(err);
+    }
   }
 
-  function removeOrder(orderId) {
-    setOrders((currentOrders) => currentOrders.filter((order) => order.id !== orderId));
+  async function removeOrder(orderId) {
+    try {
+      await deleteOrder(orderId);
+      setOrders((currentOrders) => currentOrders.filter((order) => order.id !== orderId));
+    } catch (err) {
+      console.error(err);
+    }
   }
 
   function logout() {
@@ -111,7 +158,7 @@ export function Dashboard() {
           <article>
             <span>Total Orders</span>
             <strong>{summary.total}</strong>
-            <p>Current local records</p>
+            <p>Current records</p>
           </article>
           <article>
             <span>Pending Work</span>
@@ -155,33 +202,27 @@ export function Dashboard() {
             <div className={styles.formSplit}>
               <label>
                 Items
-                <input
-                  name="items"
-                  type="number"
-                  min="1"
-                  defaultValue={blankForm.items}
-                  required
-                />
+                <input name="items" type="number" min="1" defaultValue={blankForm.items} required />
               </label>
               <label>
                 Amount
-                <input
-                  name="amount"
-                  type="number"
-                  min="0"
-                  defaultValue={blankForm.amount}
-                  required
-                />
+                <input name="amount" type="number" min="0" defaultValue={blankForm.amount} required />
               </label>
             </div>
             <label>
               Due Time
-              <input
-                name="due"
-                defaultValue={blankForm.due}
-                required
-              />
+              <input name="due" type="datetime-local" defaultValue={blankForm.due} required />
             </label>
+            <div className={styles.formSplit}>
+              <label>
+                Tower
+                <input name="tower" placeholder="Tower" />
+              </label>
+              <label>
+                Flat
+                <input name="flat" placeholder="Flat" />
+              </label>
+            </div>
             <button type="submit">Add Order</button>
           </form>
 
